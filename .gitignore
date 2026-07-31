@@ -1,0 +1,23 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# env files (jangan pernah commit ini)
+.env
+.env.local
+.env.*.local
+
+# log dev server & vercel
+dev-server.log
+.vercel
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
