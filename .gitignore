@@ -15,6 +15,7 @@
 
 # log dev server & vercel
 dev-server.log
+dev-server-err.log
 .vercel
 
 # misc
