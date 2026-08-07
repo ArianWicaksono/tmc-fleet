@@ -6,6 +6,7 @@ import {
   loadTicketEvents,
   createTicket,
   updateTicketStatus,
+  updateTicket,
 } from '../../lib/supabaseClient';
 
 const STATUS = {
@@ -76,7 +77,7 @@ function fmtTime(iso) {
 
 function splitUnits(unit) {
   return String(unit || '')
-    .split(/\r?\n/)
+    .split(/\r?\n|,/)
     .map((s) => s.trim())
     .filter(Boolean);
 }
@@ -124,6 +125,110 @@ function UnitChips({ unit, limit }) {
   );
 }
 
+function InlineText({ value, onCommit, multiline, placeholder, displayCls, iCls = inputCls, render, empty, rows = 3 }) {
+  const [editing, setEditing] = useState(false);
+  const [local, setLocal] = useState(value);
+  const taRef = useRef(null);
+
+  useEffect(() => {
+    if (editing && multiline && taRef.current) {
+      taRef.current.style.height = 'auto';
+      taRef.current.style.height = Math.max(taRef.current.scrollHeight, 96) + 'px';
+    }
+  }, [editing, local, multiline]);
+
+  function finish() {
+    setEditing(false);
+    if (String(local) !== String(value)) onCommit(local);
+  }
+
+  function onKey(e) {
+    if (e.key === 'Escape') {
+      setLocal(value);
+      setEditing(false);
+      return;
+    }
+    if (multiline) {
+      if (e.key === 'Enter' && e.ctrlKey) {
+        e.preventDefault();
+        finish();
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      finish();
+    }
+  }
+
+  if (editing) {
+    if (multiline) {
+      return (
+        <textarea
+          ref={taRef}
+          autoFocus
+          value={local}
+          placeholder={placeholder}
+          onChange={(e) => setLocal(e.target.value)}
+          onBlur={finish}
+          onKeyDown={onKey}
+          className={`${iCls} resize-none overflow-hidden`}
+          rows={rows}
+        />
+      );
+    }
+    return (
+      <input
+        autoFocus
+        value={local}
+        placeholder={placeholder}
+        onChange={(e) => setLocal(e.target.value)}
+        onBlur={finish}
+        onKeyDown={onKey}
+        className={iCls}
+      />
+    );
+  }
+
+  const has = String(value || '').trim().length > 0;
+  return (
+    <div
+      onClick={() => {
+        setLocal(value);
+        setEditing(true);
+      }}
+      title="Klik untuk edit"
+      className="group -mx-1.5 cursor-text rounded-md px-1.5 py-0.5 hover:bg-panelAlt/60 transition-colors"
+    >
+      {has ? (
+        render ? render(value) : <span className={displayCls}>{value}</span>
+      ) : (
+        <span className="text-textFaint italic text-[12px]">{empty || '—'}</span>
+      )}
+    </div>
+  );
+}
+
+function InlineSelect({ value, options, cls, onCommit }) {
+  return (
+    <span
+      className={`relative inline-flex items-center rounded-full px-2.5 py-1 text-[11.5px] font-bold cursor-pointer transition-colors hover:opacity-85 ${cls}`}
+    >
+      <span className="pointer-events-none">{value}</span>
+      <select
+        value={value}
+        onChange={(e) => onCommit(e.target.value)}
+        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+        aria-label="Ubah nilai"
+      >
+        {options.map((o) => (
+          <option key={o} value={o} className="text-text bg-panel">
+            {o}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
 export default function Tickets() {
   const [tickets, setTickets] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
@@ -137,6 +242,7 @@ export default function Tickets() {
   const [dragOverCol, setDragOverCol] = useState(null);
   const dragId = useRef(null);
   const wasDrag = useRef(false);
+  const [statusNote, setStatusNote] = useState('');
 
   const refresh = useCallback(async () => {
     try {
@@ -168,12 +274,36 @@ export default function Tickets() {
 
   async function openDetail(t) {
     setSelected(t);
+    setStatusNote('');
     await loadEventsFor(t.id);
   }
 
   function closeDetail() {
     setSelected(null);
     setEvents([]);
+    setStatusNote('');
+  }
+
+  async function commitField(field, label, value) {
+    if (!selected) return;
+    const current = String(selected[field] || '');
+    const next = String(value || '');
+    if (current === next) return;
+    try {
+      const updated = await updateTicket(
+        selected.id,
+        { [field]: value },
+        `Detail diperbarui: ${label}`
+      );
+      setFlash('Perubahan tersimpan.');
+      setTimeout(() => setFlash(''), 2500);
+      await refresh();
+      setSelected(updated);
+      await loadEventsFor(updated.id);
+    } catch (e) {
+      console.error(e);
+      setErr('Gagal menyimpan perubahan: ' + e.message);
+    }
   }
 
   async function submit(e) {
@@ -202,10 +332,11 @@ export default function Tickets() {
     }
   }
 
-  async function move(id, next) {
+  async function move(id, next, note = '') {
     try {
-      await updateTicketStatus(id, next);
+      await updateTicketStatus(id, next, note);
       setFlash(`Status → ${STATUS[next].label}.`);
+      setStatusNote('');
       setTimeout(() => setFlash(''), 3000);
       await refresh();
       if (selected && selected.id === id) {
@@ -519,17 +650,21 @@ export default function Tickets() {
           <div className="absolute inset-0 bg-black/50" onClick={closeDetail} />
           <div className="relative bg-panel border border-border rounded-[14px] max-w-[560px] w-full max-h-[85vh] overflow-y-auto shadow-2xl">
             <div className="flex items-start justify-between gap-3 px-5 pt-5 pb-4 border-b border-borderSoft">
-              <div>
+              <div className="flex-1 min-w-0">
                 <div className="font-mono text-[13px] font-bold text-brand">
                   {selected.ticket_no || '—'}
                 </div>
-                <div className="font-display font-bold text-[17px] mt-1">
-                  {selected.judul || '(tanpa judul)'}
-                </div>
+                <InlineText
+                  value={selected.judul || ''}
+                  onCommit={(v) => commitField('judul', 'Judul', v)}
+                  placeholder="Ketik judul tiket..."
+                  empty="(tanpa judul)"
+                  displayCls="font-display font-bold text-[17px] block"
+                />
               </div>
               <button
                 onClick={closeDetail}
-                className="text-[22px] leading-none text-textDim hover:text-text"
+                className="text-[22px] leading-none text-textDim hover:text-text shrink-0"
                 aria-label="Tutup"
               >
                 ×
@@ -542,33 +677,79 @@ export default function Tickets() {
                   <span className={`w-2 h-2 rounded-full ${STATUS[selected.status].dot}`} />
                   {STATUS[selected.status].label}
                 </span>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${prioCls[selected.prioritas] || prioCls.Sedang}`}>
-                  {selected.prioritas}
-                </span>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${perangkatCls[selected.perangkat] || perangkatCls.GPS}`}>
-                  {selected.perangkat}
-                </span>
-                <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-[#A855F7]/15 text-[#C084FC]">
-                  {selected.aksi}
-                </span>
+                <InlineSelect
+                  value={selected.prioritas}
+                  options={PRIORITAS}
+                  cls={prioCls[selected.prioritas] || prioCls.Sedang}
+                  onCommit={(v) => commitField('prioritas', 'Prioritas', v)}
+                />
+                <InlineSelect
+                  value={selected.perangkat}
+                  options={PERANGKAT}
+                  cls={perangkatCls[selected.perangkat] || perangkatCls.GPS}
+                  onCommit={(v) => commitField('perangkat', 'Perangkat', v)}
+                />
+                <InlineSelect
+                  value={selected.aksi}
+                  options={AKSI}
+                  cls="bg-[#A855F7]/15 text-[#C084FC]"
+                  onCommit={(v) => commitField('aksi', 'Aksi', v)}
+                />
               </div>
 
               <div>
                 <div className="text-[11px] text-textFaint font-bold uppercase tracking-wide mb-1.5">
                   Unit ({splitUnits(selected.unit).length})
                 </div>
-                <UnitChips unit={selected.unit} />
+                <InlineText
+                  value={selected.unit || ''}
+                  onCommit={(v) => commitField('unit', 'Unit', v)}
+                  multiline
+                  rows={2}
+                  placeholder="B 1234 XYZ, DD 8021 AA, CTS038 / DD 8021 AA"
+                  empty="Belum ada unit"
+                  displayCls="text-[13px] text-text"
+                  render={(uv) => <UnitChips unit={uv} />}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-[13px]">
                 <div>
                   <div className="text-[11px] text-textFaint font-semibold">Pengaju</div>
-                  <div className="text-text mt-0.5">{selected.pengaju || '—'}</div>
+                  <InlineText
+                    value={selected.pengaju || ''}
+                    onCommit={(v) => commitField('pengaju', 'Pengaju', v)}
+                    placeholder="Nama pengaju..."
+                    empty="—"
+                    displayCls="text-[13px] text-text block"
+                  />
                 </div>
                 <div>
                   <div className="text-[11px] text-textFaint font-semibold">Kontak</div>
-                  <div className="text-text mt-0.5">{selected.kontak || '—'}</div>
+                  <InlineText
+                    value={selected.kontak || ''}
+                    onCommit={(v) => commitField('kontak', 'Kontak', v)}
+                    placeholder="No HP..."
+                    empty="—"
+                    displayCls="text-[13px] text-text block"
+                  />
                 </div>
+              </div>
+
+              <div>
+                <div className="text-[11px] text-textFaint font-bold uppercase tracking-wide mb-1.5">Deskripsi</div>
+                <InlineText
+                  value={selected.deskripsi || ''}
+                  onCommit={(v) => commitField('deskripsi', 'Deskripsi', v)}
+                  multiline
+                  rows={2}
+                  placeholder="Klik untuk menulis deskripsi / detail / alamat / kendala..."
+                  empty="Tulis deskripsi..."
+                  displayCls="text-[13px] text-text leading-relaxed whitespace-pre-wrap block"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-[13px]">
                 <div>
                   <div className="text-[11px] text-textFaint font-semibold">Dibuat</div>
                   <div className="text-text mt-0.5">{fmtTime(selected.created_at)}</div>
@@ -580,13 +761,6 @@ export default function Tickets() {
                   <div className="text-text mt-0.5">{fmtTime(selected.resolved_at || selected.updated_at)}</div>
                 </div>
               </div>
-
-              {selected.deskripsi && (
-                <div>
-                  <div className="text-[11px] text-textFaint font-bold uppercase tracking-wide mb-1.5">Deskripsi</div>
-                  <div className="text-[13px] text-text leading-relaxed whitespace-pre-wrap">{selected.deskripsi}</div>
-                </div>
-              )}
 
               <div>
                 <div className="text-[11px] text-textFaint font-bold uppercase tracking-wide mb-1.5">
@@ -614,17 +788,18 @@ export default function Tickets() {
             </div>
 
             {NEXT[selected.status].length > 0 && (
-              <div className="px-5 py-4 border-t border-borderSoft flex flex-wrap gap-2">
-                <span className="text-[12px] text-textDim self-center font-semibold mr-1">Ubah status:</span>
-                {NEXT[selected.status].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => move(selected.id, n)}
-                    className={`px-3 py-1.5 rounded-lg font-semibold text-[12px] border ${STATUS_BTN[n]}`}
-                  >
-                    → {STATUS[n].label}
-                  </button>
-                ))}
+              <div className="px-5 py-4 border-t border-borderSoft">
+                <div className="flex flex-wrap gap-2">
+                  {NEXT[selected.status].map((n) => (
+                    <button
+                      key={n}
+                      onClick={() => move(selected.id, n, statusNote.trim())}
+                      className={`px-3 py-1.5 rounded-lg font-semibold text-[12px] border ${STATUS_BTN[n]}`}
+                    >
+                      → {STATUS[n].label}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
