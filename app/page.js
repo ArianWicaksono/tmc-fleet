@@ -25,6 +25,7 @@ import Tickets from './components/Tickets';
 import HomeHub from './components/HomeHub';
 import MasterData from './components/MasterData';
 import Safety from './components/Safety';
+import GpsMonitor from './components/GpsMonitor';
 
 const FleetMap = dynamic(() => import('./components/FleetMap'), {
   ssr: false,
@@ -146,6 +147,7 @@ export default function DashboardPage() {
 
   const MODULES = [
     { key: 'dashboard', label: 'Dashcam' },
+    { key: 'gps', label: 'GPS Update' },
     { key: 'tickets', label: 'Tiket Report' },
     { key: 'master', label: 'Master Data' },
     { key: 'safety', label: 'Safety' },
@@ -333,6 +335,8 @@ export default function DashboardPage() {
         )}
 
         {view === 'tickets' && <Tickets />}
+
+        {view === 'gps' && <GpsMonitor />}
 
         {view === 'master' && <MasterData />}
 

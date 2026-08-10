@@ -10,6 +10,14 @@ const MODULES = [
     status: 'Aktif',
   },
   {
+    key: 'gps',
+    name: 'GPS Update',
+    desc: 'Live dari vendor VTS: unit GPS yang tidak update, distribusi lama offline, dan daftar detail armada.',
+    grad: 'linear-gradient(135deg, #34D399, #059669)',
+    initial: 'G',
+    status: 'Aktif',
+  },
+  {
     key: 'tickets',
     name: 'Tiket Report',
     desc: 'Permintaan user: pindah, update, aktivasi, nonaktif perangkat — lengkap dengan alurnya.',
